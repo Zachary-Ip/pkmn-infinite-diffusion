@@ -1,0 +1,13 @@
+model:
+  name: "UNet"
+  raw_image_size: 288
+  image_size: 32
+  num_channels: 128
+  num_res_blocks: 2
+
+training:
+  batch_size: 32
+  num_epochs: 100
+  learning_rate: 0.0001
+  optimizer: "AdamW"
+  device: "cuda"
