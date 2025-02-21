@@ -4,15 +4,15 @@ from torch import nn
 from torch.nn import functional as F
 from einops.layers.torch import Rearrange
 
-from models.attention import Attention
-
+from src.models.attention import Attention
 
 
 def get_downsample_layer(in_dim, hidden_dim, is_last):
     if not is_last:
         return nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (c p1 p2) h w', p1=2, p2=2),
-            nn.Conv2d(in_dim * 4, hidden_dim, 1))
+            Rearrange("b c (h p1) (w p2) -> b (c p1 p2) h w", p1=2, p2=2),
+            nn.Conv2d(in_dim * 4, hidden_dim, 1),
+        )
     else:
         return nn.Conv2d(in_dim, hidden_dim, 3, padding=1)
 
@@ -26,8 +26,10 @@ def get_attn_layer(in_dim, use_full_attn, use_flash_attn):
 
 def get_upsample_layer(in_dim, hidden_dim, is_last):
     if not is_last:
-        return nn.Sequential(nn.Upsample(scale_factor=2, mode='nearest'),
-                             nn.Conv2d(in_dim, hidden_dim, 3, padding=1))
+        return nn.Sequential(
+            nn.Upsample(scale_factor=2, mode="nearest"),
+            nn.Conv2d(in_dim, hidden_dim, 3, padding=1),
+        )
     else:
         return nn.Conv2d(in_dim, hidden_dim, 3, padding=1)
 
@@ -35,7 +37,8 @@ def get_upsample_layer(in_dim, hidden_dim, is_last):
 def sinusoidal_embedding(timesteps, dim):
     half_dim = dim // 2
     exponent = -math.log(10000) * torch.arange(
-        start=0, end=half_dim, dtype=torch.float32)
+        start=0, end=half_dim, dtype=torch.float32
+    )
     exponent = exponent / (half_dim - 1.0)
 
     emb = torch.exp(exponent).to(device=timesteps.device)
@@ -45,36 +48,44 @@ def sinusoidal_embedding(timesteps, dim):
 
 
 class ResidualBlock(nn.Module):
-
-    def __init__(self,
-                 in_channels,
-                 out_channels,
-                 temb_channels,
-                 kernel_size=3,
-                 stride=1,
-                 padding=1,
-                 groups=8):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        temb_channels,
+        kernel_size=3,
+        stride=1,
+        padding=1,
+        groups=8,
+    ):
         super(ResidualBlock, self).__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
 
         self.time_emb_proj = nn.Sequential(
-            nn.SiLU(), torch.nn.Linear(temb_channels, out_channels))
+            nn.SiLU(), torch.nn.Linear(temb_channels, out_channels)
+        )
 
-        self.residual_conv = nn.Conv2d(
-            in_channels, out_channels=out_channels,
-            kernel_size=1) if in_channels != out_channels else nn.Identity()
+        self.residual_conv = (
+            nn.Conv2d(in_channels, out_channels=out_channels, kernel_size=1)
+            if in_channels != out_channels
+            else nn.Identity()
+        )
 
-        self.conv1 = nn.Conv2d(in_channels,
-                               out_channels=out_channels,
-                               kernel_size=kernel_size,
-                               stride=stride,
-                               padding=padding)
-        self.conv2 = nn.Conv2d(out_channels,
-                               out_channels=out_channels,
-                               kernel_size=kernel_size,
-                               stride=stride,
-                               padding=padding)
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
+        self.conv2 = nn.Conv2d(
+            out_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+        )
 
         self.norm1 = nn.GroupNorm(num_channels=out_channels, num_groups=groups)
         self.norm2 = nn.GroupNorm(num_channels=out_channels, num_groups=groups)
@@ -98,12 +109,13 @@ class ResidualBlock(nn.Module):
 
 
 class UNet(nn.Module):
-
-    def __init__(self,
-                 in_channels,
-                 hidden_dims=[64, 128, 256, 512],
-                 image_size=64,
-                 use_flash_attn=False):
+    def __init__(
+        self,
+        in_channels,
+        hidden_dims=[64, 128, 256, 512],
+        image_size=64,
+        use_flash_attn=False,
+    ):
         super(UNet, self).__init__()
 
         self.sample_size = image_size
@@ -114,14 +126,14 @@ class UNet(nn.Module):
         time_embed_dim = timestep_input_dim * 4
 
         self.time_embedding = nn.Sequential(
-            nn.Linear(timestep_input_dim, time_embed_dim), nn.SiLU(),
-            nn.Linear(time_embed_dim, time_embed_dim))
+            nn.Linear(timestep_input_dim, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, time_embed_dim),
+        )
 
-        self.init_conv = nn.Conv2d(in_channels,
-                                   out_channels=hidden_dims[0],
-                                   kernel_size=3,
-                                   stride=1,
-                                   padding=1)
+        self.init_conv = nn.Conv2d(
+            in_channels, out_channels=hidden_dims[0], kernel_size=3, stride=1, padding=1
+        )
 
         down_blocks = []
 
@@ -131,12 +143,15 @@ class UNet(nn.Module):
             is_first = idx == 0
             use_attn = True if use_flash_attn else not is_first
             down_blocks.append(
-                nn.ModuleList([
-                    ResidualBlock(in_dim, in_dim, time_embed_dim),
-                    ResidualBlock(in_dim, in_dim, time_embed_dim),
-                    get_attn_layer(in_dim, use_attn, use_flash_attn),
-                    get_downsample_layer(in_dim, hidden_dim, is_last)
-                ]))
+                nn.ModuleList(
+                    [
+                        ResidualBlock(in_dim, in_dim, time_embed_dim),
+                        ResidualBlock(in_dim, in_dim, time_embed_dim),
+                        get_attn_layer(in_dim, use_attn, use_flash_attn),
+                        get_downsample_layer(in_dim, hidden_dim, is_last),
+                    ]
+                )
+            )
             in_dim = hidden_dim
 
         self.down_blocks = nn.ModuleList(down_blocks)
@@ -152,25 +167,29 @@ class UNet(nn.Module):
             is_last = idx >= (len(hidden_dims) - 2)
             use_attn = True if use_flash_attn else not is_last
             up_blocks.append(
-                nn.ModuleList([
-                    ResidualBlock(in_dim + hidden_dim, in_dim, time_embed_dim),
-                    ResidualBlock(in_dim + hidden_dim, in_dim, time_embed_dim),
-                    get_attn_layer(in_dim, use_attn, use_flash_attn),
-                    get_upsample_layer(in_dim, hidden_dim, is_last)
-                ]))
+                nn.ModuleList(
+                    [
+                        ResidualBlock(in_dim + hidden_dim, in_dim, time_embed_dim),
+                        ResidualBlock(in_dim + hidden_dim, in_dim, time_embed_dim),
+                        get_attn_layer(in_dim, use_attn, use_flash_attn),
+                        get_upsample_layer(in_dim, hidden_dim, is_last),
+                    ]
+                )
+            )
             in_dim = hidden_dim
 
         self.up_blocks = nn.ModuleList(up_blocks)
 
-        self.out_block = ResidualBlock(hidden_dims[0] * 2, hidden_dims[0],
-                                       time_embed_dim)
+        self.out_block = ResidualBlock(
+            hidden_dims[0] * 2, hidden_dims[0], time_embed_dim
+        )
         self.conv_out = nn.Conv2d(hidden_dims[0], out_channels=3, kernel_size=1)
 
     def forward(self, sample, timesteps):
         if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor([timesteps],
-                                     dtype=torch.long,
-                                     device=sample.device)
+            timesteps = torch.tensor(
+                [timesteps], dtype=torch.long, device=sample.device
+            )
 
         timesteps = torch.flatten(timesteps)
         timesteps = timesteps.broadcast_to(sample.shape[0])
@@ -209,9 +228,3 @@ class UNet(nn.Module):
         x = self.out_block(torch.cat((x, r), dim=1), t_emb)
         out = self.conv_out(x)
         return {"sample": out}
-
-
-
-
-
-

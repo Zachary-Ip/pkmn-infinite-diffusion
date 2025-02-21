@@ -4,7 +4,8 @@ import argparse
 from tqdm import tqdm
 from pathlib import Path
 
-def preprocess(directory:str):
+
+def preprocess(directory: str):
     dir_path = Path(directory)
     if not dir_path.exists() or not dir_path.is_dir():
         print(f"Error: Directory '{dir_path}' does not exist.")
@@ -14,9 +15,10 @@ def preprocess(directory:str):
             im = _load_image(file)
             if im:
                 im = _add_background(im)
-                im.convert('RGB').save(file, "PNG")
+                im.convert("RGB").save(file, "PNG")
 
-def _load_image(path:str, delete: bool = True):
+
+def _load_image(path: str, delete: bool = True):
     """
     Attempt to load an image and verify its integrity.
     If the image is corrupted, log a warning and return None.
@@ -37,7 +39,6 @@ def _load_image(path:str, delete: bool = True):
         if delete:
             os.remove(path)
         return None
-    
 
 
 def _add_background(im):
@@ -51,19 +52,19 @@ def _add_background(im):
         PIL.Image.Image: Image with transparency removed (RGB mode).
     """
     if im.mode == "RGBA":
-        
+
         new_im = Image.new("RGBA", im.size, "WHITE")
-        new_im.paste(im,(0,0), im)
+        new_im.paste(im, (0, 0), im)
         return new_im
     else:
-        print("Loaded image does not have transparency")
         return im
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process images in a directory.")
-    parser.add_argument("directory", type=str, help="Path to the directory containing images")
+    parser.add_argument(
+        "directory", type=str, help="Path to the directory containing images"
+    )
     args = parser.parse_args()
 
     preprocess(args.directory)
-
-

@@ -15,12 +15,12 @@ class SimpleUNet(nn.Module):
             nn.Conv2d(3, 64, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.ReLU()
+            nn.ReLU(),
         )
         self.decoder = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv2d(64, 3, kernel_size=3, padding=1)
+            nn.Conv2d(64, 3, kernel_size=3, padding=1),
         )
 
     def forward(self, x):
@@ -28,11 +28,9 @@ class SimpleUNet(nn.Module):
         x = self.decoder(x)
         return x
 
+
 # Load Dataset (Ensure images are small)
-transform = transforms.Compose([
-    transforms.Resize((64, 64)),
-    transforms.ToTensor()
-])
+transform = transforms.Compose([transforms.Resize((64, 64)), transforms.ToTensor()])
 
 dataset = datasets.ImageFolder(root="data/raw/", transform=transform)
 dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
@@ -78,5 +76,6 @@ def generate_sample(model):
         plt.axis("off")
         plt.title("Generated Sample")
         plt.show()
+
 
 generate_sample(model)  # View a sample output
