@@ -1,7 +1,9 @@
 # Pokémon Diffusion Model
+
 A deep learning model to generate Pokémon sprites using diffusion.
 
 ## Installation
+
 ```bash
 git clone https://github.com/yourname/.git
 cd pokemon-diffusion
@@ -13,13 +15,16 @@ poetry install
 ```bash
 poetry run jupyter notebook
 ```
+
 # Call scripts from within notebook
-# !python scripts/simple_diffusion.py
 
-
+```
+!python scripts/simple_diffusion.py
+```
 
 ## Repository structure
 
+```
 pkmn-infinite-diffusion/
 │── data/                      # Raw & processed dataset
 │   ├── raw/                   # Unprocessed Pokémon sprites
@@ -39,3 +44,4 @@ pkmn-infinite-diffusion/
 │── README.md                  # Project documentation
 │── .gitignore                 # Ignore unnecessary files (datasets, checkpoints, etc.)
 │── LICENSE                    # Licensing information
+```

@@ -1,11 +1,12 @@
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-import matplotlib.pyplot as plt
-import numpy as np
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+
 
 # Simple U-Net Model (Shallow for Testing)
 class SimpleUNet(nn.Module):

@@ -1,8 +1,9 @@
-import os
-from PIL import Image, UnidentifiedImageError
 import argparse
-from tqdm import tqdm
+import os
 from pathlib import Path
+
+from PIL import Image, UnidentifiedImageError
+from tqdm import tqdm
 
 
 def preprocess(directory: str):

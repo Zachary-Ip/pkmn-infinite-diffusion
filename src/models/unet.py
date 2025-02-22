@@ -1,8 +1,9 @@
 import math
+
 import torch
+from einops.layers.torch import Rearrange
 from torch import nn
 from torch.nn import functional as F
-from einops.layers.torch import Rearrange
 
 from src.models.attention import Attention
 
@@ -112,7 +113,7 @@ class UNet(nn.Module):
     def __init__(
         self,
         in_channels,
-        hidden_dims=[64, 128, 256, 512],
+        hidden_dims=[64, 128, 256],  # removed 512 dimension
         image_size=64,
         use_flash_attn=False,
     ):

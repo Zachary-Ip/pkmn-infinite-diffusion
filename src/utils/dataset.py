@@ -1,13 +1,15 @@
+import os
+
+import torchvision.transforms as transforms
+from omegaconf import OmegaConf
 from PIL import Image, UnidentifiedImageError
 from torch.utils.data import Dataset
-import os
-from omegaconf import OmegaConf
 
 # Define Transformations (Resize + Normalize)
 
-import torchvision.transforms as transforms
 
 config = OmegaConf.load("configs/train.yaml")
+
 transform = transforms.Compose(
     [
         transforms.Resize(

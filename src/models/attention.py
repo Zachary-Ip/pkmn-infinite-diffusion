@@ -1,12 +1,10 @@
 import torch
-from torch import nn, einsum
 import torch.nn.functional as F
-
 from einops import rearrange
+from torch import einsum, nn
 
 
 class RMSNorm(nn.Module):
-
     def __init__(self, dim):
         super().__init__()
         self.g = nn.Parameter(torch.ones(1, dim, 1, 1))
@@ -16,10 +14,9 @@ class RMSNorm(nn.Module):
 
 
 class Attention(nn.Module):
-
     def __init__(self, dim, heads=4, dim_head=32, use_flash_attn=False):
         super().__init__()
-        self.scale = dim_head**-0.5
+        self.scale = dim_head ** -0.5
         self.heads = heads
         hidden_dim = dim_head * heads
         self.use_flash_attn = use_flash_attn
