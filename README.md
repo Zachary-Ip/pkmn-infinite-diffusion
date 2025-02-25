@@ -40,8 +40,10 @@ pkmn-infinite-diffusion/
 │── tests/                     # Unit tests for components
 │── logs/                      # Training logs & TensorBoard files
 │── results/                   # Generated Pokémon samples
-│── environment.yml / pyproject.toml  # Dependency management (Conda/Poetry)
+│── pyproject.toml             # Poetry Dependency management
 │── README.md                  # Project documentation
+│── test_samples/              # Stores generated images
+│── trained_models/            # Stores trained models
 │── .gitignore                 # Ignore unnecessary files (datasets, checkpoints, etc.)
 │── LICENSE                    # Licensing information
 ```
