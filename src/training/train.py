@@ -63,9 +63,7 @@ def main(args):
         ]
     )
     dataset = PokemonDataset(args.dataset_path, transform=transform)
-    print("data set path is ", dataset_path)
     train_dataloader = DataLoader(dataset, batch_size=args.train_batch_size)
-    print("train batch size is ", train_batch_size)
     steps_per_epoch = len(train_dataloader)
     total_num_steps = (
         steps_per_epoch * args.num_epochs // args.gradient_accumulation_steps
@@ -87,13 +85,10 @@ def main(args):
     losses = []
 
     # Begin training
-    print("Beginning Training...")
     for epoch in range(args.num_epochs):
         progress_bar = tqdm(total=steps_per_epoch)
         progress_bar.set_description(f"Epoch {epoch}")
         losses_log = 0
-        print("Making steps for first epoch")
-        print(len(train_dataloader))
         for step, batch in enumerate(train_dataloader):
             orig_images = batch["image"].to(device)
 
@@ -181,9 +176,7 @@ if __name__ == "__main__":
 
     # Read the config file
     config = configparser.ConfigParser()
-    print("reading config file: ", args.config_file)
     config.read(args.config_file)
-    print("Config sections", config.sections())
     # Load parameters from the config file
     dataset_name = config.get(
         "settings", "dataset_name", fallback="pkmn-infinite-fusion-sprites"
@@ -217,8 +210,8 @@ if __name__ == "__main__":
     use_clip_grad = config.getboolean("settings", "use_clip_grad", fallback=False)
     use_flash_attn = config.getboolean("settings", "use_flash_attn", fallback=False)
     logging_dir = config.get("settings", "logging_dir", fallback="logs")
-    pretrained_model_path = config.get(
-        "settings", "pretrained_model_path", fallback=None
+    pretrained_model_path = ast.literal_eval(
+        config.get("settings", "pretrained_model_path", fallback=None)
     )
     fp16_precision = config.getboolean("settings", "fp16_precision", fallback=False)
     gamma = config.getfloat("settings", "gamma", fallback=0.996)
