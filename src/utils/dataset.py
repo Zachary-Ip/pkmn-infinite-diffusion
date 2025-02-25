@@ -1,5 +1,9 @@
+import csv
+import json
 import os
+import re
 
+import torch
 import torchvision.transforms as transforms
 from omegaconf import OmegaConf
 from PIL import Image, UnidentifiedImageError
@@ -22,10 +26,23 @@ transform = transforms.Compose(
 
 
 class PokemonDataset(Dataset):
-    def __init__(self, image_folder, transform=None):
+    def __init__(self, image_folder, metadata_folder, transform=None):
         self.image_folder = image_folder
         self.image_files = self.get_valid_images(image_folder)
         self.transform = transform
+
+        # Get the metadata
+        self.metadata = self.read_data(metadata_folder, "metadata.json")
+        self.types = self.read_data(metadata_folder, "types.csv")
+        self.egg_groups = self.read_data(metadata_folder, "egg_groups.csv")
+        self.colors = self.read_data(metadata_folder, "colors.csv")
+        self.shapes = self.read_data(metadata_folder, "shapes.csv")
+
+        # Map metadata to one-hot encoding
+        self.type_to_idx = {t: i for i, t in enumerate(self.types)}
+        self.egg_group_to_idx = {e: i for i, e in enumerate(self.egg_groups)}
+        self.color_to_idx = {t: i for i, t in enumerate(self.colors)}
+        self.shapes_group_to_idx = {e: i for i, e in enumerate(self.shapes)}
 
     def get_valid_images(self, folder):
         valid_images = []
@@ -40,12 +57,40 @@ class PokemonDataset(Dataset):
                     print(f"Skipping corrupted file: {f}")
         return valid_images
 
+    @staticmethod
+    def read_data(dir, file):
+        path = os.path.join(dir, file)
+        _, ext = os.path.splitext(file)
+        with open(path, "r") as f:
+            if ext == "json":
+                data = json.load(f)
+            elif ext == "csv":
+                reader = csv.reader(f)
+                data = {row[0] for row in reader}
+            else:
+                raise ValueError(f"File extension for {file} recognized")
+        return data
+
+    def encode_one_hot(self, labels, label_to_idx, num_classes):
+        """Convert a list of labels into a one-hot encoded tensor"""
+        one_hot = torch.zeros(num_classes)
+
+    @staticmethod
+    def get_ID_from_name(file):
+        name, _ = os.path.splitext(file)
+        idx_list = name.split(".")
+
+        # drop any letters from the name
+        return [re.sub("\D", "", s) for s in idx_list]
+
     def __len__(self):
         return len(self.image_files)
 
     def __getitem__(self, idx):
         img_path = os.path.join(self.image_folder, self.image_files[idx])
         image = Image.open(img_path).convert("RGB")
+        pkmn_ids = self.get_ID_from_name(img_path)
+
         if self.transform:
             image = self.transform(image)
         return {"image": image}

@@ -14,7 +14,7 @@ SPECIES_API = "https://pokeapi.co/api/v2/pokemon-species"
 def main(args):
 
     # Request to get number of total pokemon
-    all_pokemon = fetch_json(f"{POKEMON_API}?limit=100000&offset=0", delay=args.delay)
+    all_pokemon = fetch_json(f"{POKEMON_API}?limit=1025&offset=0", delay=args.delay)
     num_pkmn = all_pokemon["count"]
 
     # run through pokemon and grab data
