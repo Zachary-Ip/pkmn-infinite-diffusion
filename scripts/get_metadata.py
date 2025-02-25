@@ -5,14 +5,16 @@ import os
 import time
 
 import requests
+from tqdm import tqdm
+
+POKEMON_API = "https://pokeapi.co/api/v2/pokemon"
+SPECIES_API = "https://pokeapi.co/api/v2/pokemon-species"
 
 
 def main(args):
 
     # Request to get number of total pokemon
-    all_pokemon = fetch_json(
-        "https://pokeapi.co/api/v2/pokemon?limit=100000&offset=0", delay=args.delay
-    )
+    all_pokemon = fetch_json(f"{POKEMON_API}?limit=100000&offset=0", delay=args.delay)
     num_pkmn = all_pokemon["count"]
 
     # run through pokemon and grab data
@@ -23,32 +25,15 @@ def main(args):
     # save down metadata to file
     metadata_path = os.path.join(args.output_dir, "metadata.json")
 
+    print(f"Saving metadata.json to {args.output_dir}")
+
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=4)
 
-    type_path = os.path.join(args.output_dir, "types.csv")
-
-    with open(type_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(type_set)
-
-    egg_path = os.path.join(args.output_dir, "egg_groups.csv")
-
-    with open(egg_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(egg_group_set)
-
-    color_path = os.path.join(args.output_dir, "colors.csv")
-
-    with open(color_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(color_set)
-
-    shape_path = os.path.join(args.output_dir, "shapes.csv")
-
-    with open(shape_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(shape_set)
+    save_csv(type_set, args.output_dir, "types.csv")
+    save_csv(egg_group_set, args.output_dir, "egg_groups.csv")
+    save_csv(color_set, args.output_dir, "colors.csv")
+    save_csv(shape_set, args.output_dir, "shapes.csv")
 
 
 def fetch_json(url, delay=0.1):
@@ -64,6 +49,7 @@ def fetch_json(url, delay=0.1):
 
 
 def request_data(num_pkmn, delay=0.1):
+    """Fetch metadata for all Pokémon and store unique values in sets."""
     # initialize storage variables for metadata
     metadata = {}
     type_set = set()
@@ -71,18 +57,15 @@ def request_data(num_pkmn, delay=0.1):
     color_set = set()
     shape_set = set()
 
-    for i in range(1, num_pkmn + 1):
-        base_data = fetch_json(f"https://pokeapi.co/api/v2/pokemon/{i}/", delay=delay)
+    for i in tqdm(range(1, num_pkmn + 1)):
+        base_data = fetch_json(f"{POKEMON_API}/{i}/", delay=delay)
         if not base_data:
             continue
         types = []
         for type in base_data["types"]:
             types.append(type["type"]["name"])
             type_set.add(type["type"]["name"])
-
-        species_data = fetch_json(
-            f"https://pokeapi.co/api/v2/pokemon-species/{i}/", delay=delay
-        )
+        species_data = fetch_json(f"{SPECIES_API}/{i}/", delay=delay)
         if not species_data:
             continue
         egg_groups = []
@@ -105,6 +88,7 @@ def request_data(num_pkmn, delay=0.1):
 def save_csv(data_set, output_dir, filename):
     """Save a set to a CSV file."""
     path = os.path.join(output_dir, filename)
+    print(f"Saving {filename} to {output_dir}")
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(data_set)
@@ -121,7 +105,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--delay",
         type=float,
-        default=0.1,
+        default=0.05,
         help="Delay between API calls",
     )
     args = parser.parse_args()
