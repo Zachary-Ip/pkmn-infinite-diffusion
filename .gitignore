@@ -1,7 +1,8 @@
 # Training or Generated files
 data/
 results/
-checkpoints/
+test_samples/
+trained_models/
 notebooks/ # May remove this to add tutorials
 *.pth
 

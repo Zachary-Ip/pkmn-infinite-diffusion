@@ -1,7 +1,7 @@
 import argparse
 import ast
 import configparser
-
+import os
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -18,6 +18,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader
 from torchinfo import summary
 from tqdm import tqdm
+from pathlib import Path
 
 SEED = 123
 
@@ -62,8 +63,9 @@ def main(args):
         ]
     )
     dataset = PokemonDataset(args.dataset_path, transform=transform)
+    print("data set path is ", dataset_path)
     train_dataloader = DataLoader(dataset, batch_size=args.train_batch_size)
-
+    print("train batch size is ", train_batch_size)
     steps_per_epoch = len(train_dataloader)
     total_num_steps = (
         steps_per_epoch * args.num_epochs // args.gradient_accumulation_steps
@@ -79,16 +81,19 @@ def main(args):
         num_training_steps=total_num_steps,
     )
 
-    summary(model, [(1, 3, args.resolution, args.resolution), (1,)], verbose=1)
+    # summary(model, [(1, 3, args.resolution, args.resolution), (1,)], verbose=1)
     scaler = GradScaler(enabled=args.fp16_precision)
     global_step = 0
     losses = []
 
     # Begin training
+    print("Beginning Training...")
     for epoch in range(args.num_epochs):
         progress_bar = tqdm(total=steps_per_epoch)
         progress_bar.set_description(f"Epoch {epoch}")
         losses_log = 0
+        print("Making steps for first epoch")
+        print(len(train_dataloader))
         for step, batch in enumerate(train_dataloader):
             orig_images = batch["image"].to(device)
 
@@ -98,24 +103,19 @@ def main(args):
                 0, noise_scheduler.num_train_timesteps, (batch_size,), device=device
             ).long()
             noisy_images = noise_scheduler.add_noise(orig_images, noise, timesteps)
-
             optimizer.zero_grad()
-            with autocast(enabled=args.fp16_precision):
+            with autocast(enabled=args.fp16_precision, device_type=device.type):
                 noise_pred = model(noisy_images, timesteps)["sample"]
                 loss = F.l1_loss(noise_pred, noise)
-
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
-
             ema.update_params(gamma)
             gamma = ema.update_gamma(global_step)
-
             if args.use_clip_grad:
                 clip_grad_norm_(model.parameters(), 1.0)
 
             lr_scheduler.step()
-
             progress_bar.update(1)
             losses_log += loss.detach().item()
             logs = {
@@ -125,7 +125,6 @@ def main(args):
                 "step": global_step,
                 "gamma": gamma,
             }
-
             progress_bar.set_postfix(**logs)
             global_step += 1
 
@@ -144,6 +143,11 @@ def main(args):
                     )
 
                     save_images(generated_images, epoch, args)
+                    out_dir = Path(args.output_dir)
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    out_path = os.path.join(
+                        args.output_dir, f"checkpoint_{epoch}_{global_step}.pth"
+                    )
 
                     torch.save(
                         {
@@ -151,7 +155,7 @@ def main(args):
                             "ema_model_state": ema.ema_model.state_dict(),
                             "optimizer_state": optimizer.state_dict(),
                         },
-                        args.output_dir,
+                        out_path,
                     )
 
             progress_bar.close()
@@ -164,20 +168,27 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config_file",
         type=str,
-        default="config.ini",
+        default="configs/config.ini",
         help="Path to the config file",
+    )
+    parser.add_argument(
+        "--verbose",
+        type=bool,
+        default=False,
+        help="Display model info",
     )
     args = parser.parse_args()
 
     # Read the config file
     config = configparser.ConfigParser()
+    print("reading config file: ", args.config_file)
     config.read(args.config_file)
-
+    print("Config sections", config.sections())
     # Load parameters from the config file
     dataset_name = config.get(
         "settings", "dataset_name", fallback="pkmn-infinite-fusion-sprites"
     )
-    dataset_path = config.get("settings", "dataset_path", fallback="./data")
+    dataset_path = config.get("settings", "dataset_path", fallback="./data/raw/")
     hidden_dims = ast.literal_eval(
         config.get("settings", "hidden_dims", fallback="[64, 128, 256]")
     )
@@ -186,9 +197,7 @@ if __name__ == "__main__":
         "settings", "n_inference_timesteps", fallback=250
     )
     resolution = config.getint("settings", "resolution", fallback=32)
-    output_dir = config.get(
-        "settings", "output_dir", fallback="trained_models/ddpm-model-64.pth"
-    )
+    output_dir = config.get("settings", "output_dir", fallback="trained_models/")
     samples_dir = config.get("settings", "samples_dir", fallback="test_samples/")
     loss_logs_dir = config.get("settings", "loss_logs_dir", fallback="training_logs")
     cache_dir = config.get("settings", "cache_dir", fallback=None)
@@ -312,23 +321,3 @@ if __name__ == "__main__":
         gamma,
     )
     main(config_args)
-
-
-# Original Code
-# if __name__ == "__main__":
-#     parser = argparse.ArgumentParser(description="Simple example of a training script.")
-#     parser.add_argument("--dataset_name", type=str, default=None)
-#     parser.add_argument(
-#         "--dataset_path",
-#         type=str,
-#         default="./data",
-#         help="Path where datasets will be saved",
-#     )
-#     args = parser.parse_args()
-
-#     if args.dataset_name is None and args.dataset_path is None:
-#         raise ValueError(
-#             "You must specify either a dataset name from the hub or a train data directory."
-#         )
-
-#     main(args)
