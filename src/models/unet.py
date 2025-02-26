@@ -239,80 +239,77 @@ class UNet(nn.Module):
             hidden_dims[0], out_channels=3, kernel_size=1
         )  # Output RGB image
 
-    def forward(self, sample, timesteps, metadata):
-        """
-        Forward pass of the U-Net.
+    def forward(self, sample, timesteps, metadata=None, guidance_scale=1.0):
+    """
+    Forward pass of the U-Net with optional Classifier-Free Guidance.
 
-        Args:
-            sample (Tensor): Input image tensor (B, C, H, W).
-            timesteps (Tensor): Current diffusion timestep (B,).
-            metadata (Tensor): One-hot encoded metadata (B, metadata_dim).
+    Args:
+        sample (Tensor): Input image tensor (B, C, H, W).
+        timesteps (Tensor): Current diffusion timestep (B,).
+        metadata (Tensor, optional): One-hot encoded metadata (B, metadata_dim). Can be None for CFG.
+        guidance_scale (float): Strength of classifier-free guidance (default 1.0, no guidance).
 
-        Returns:
-            dict: Output sample tensor with generated image.
-        """
-        # Ensure timesteps is a tensor and has the correct shape
-        if not torch.is_tensor(timesteps):
-            timesteps = torch.tensor(
-                [timesteps], dtype=torch.long, device=sample.device
-            )
+    Returns:
+        dict: Output sample tensor with generated image.
+    """
 
-        timesteps = torch.flatten(timesteps)  # Flatten into (B,)
-        timesteps = timesteps.broadcast_to(
-            sample.shape[0]
-        )  # Ensure shape matches batch size
+    if not torch.is_tensor(timesteps):
+        timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
 
-        # Compute time embedding
-        t_emb = sinusoidal_embedding(
-            timesteps, self.hidden_dims[0]
-        )  # Apply positional encoding
-        t_emb = self.time_embedding(t_emb)  # Pass through learned embedding MLP
+    timesteps = torch.flatten(timesteps)
+    timesteps = timesteps.broadcast_to(sample.shape[0])
 
-        # Compute metadata embedding and add it to time embedding
-        m_emb = self.metadata_embedding(
-            metadata
-        )  # Convert metadata to same latent space
-        t_emb = (
-            t_emb + m_emb
-        )  # Feature addition: enrich time embedding with metadata information
+    # Compute time embedding
+    t_emb = sinusoidal_embedding(timesteps, self.hidden_dims[0])
+    t_emb = self.time_embedding(t_emb)
 
-        # Initial convolution to process the input image
-        x = self.init_conv(sample)
-        r = x.clone()  # Save for residual connection
+    if metadata is not None:
+        # Compute metadata embedding and add to time embedding
+        m_emb = self.metadata_embedding(metadata)
+        t_emb = t_emb + m_emb  # Feature addition for conditioning
 
-        skips = []  # Store skip connections for U-Net
+    # Initial convolution to process the input image
+    x = self.init_conv(sample)
+    r = x.clone()  # Save for residual connection
 
-        # Encoder (downsampling)
-        for block1, block2, attn, downsample in self.down_blocks:
-            x = block1(x, t_emb)  # Apply first residual block
-            skips.append(x)  # Store for skip connection
+    skips = []
 
-            x = block2(x, t_emb)  # Apply second residual block
-            x = attn(x)  # Apply attention (if enabled)
-            skips.append(x)  # Store for skip connection
+    # Encoder (downsampling)
+    for block1, block2, attn, downsample in self.down_blocks:
+        x = block1(x, t_emb)
+        skips.append(x)
 
-            x = downsample(x)  # Downsample feature maps
+        x = block2(x, t_emb)
+        x = attn(x)
+        skips.append(x)
 
-        # Bottleneck processing
-        x = self.mid_block1(x, t_emb)  # Apply residual block
-        x = self.mid_attn(x)  # Apply attention
-        x = self.mid_block2(x, t_emb)  # Apply residual block
+        x = downsample(x)
 
-        # Decoder (upsampling)
-        for block1, block2, attn, upsample in self.up_blocks:
-            x = torch.cat((x, skips.pop()), dim=1)  # Skip connection
-            x = block1(x, t_emb)  # Apply residual block
+    # Bottleneck processing
+    x = self.mid_block1(x, t_emb)
+    x = self.mid_attn(x)
+    x = self.mid_block2(x, t_emb)
 
-            x = torch.cat((x, skips.pop()), dim=1)  # Skip connection
-            x = block2(x, t_emb)  # Apply residual block
-            x = attn(x)  # Apply attention (if enabled)
+    # Decoder (upsampling)
+    for block1, block2, attn, upsample in self.up_blocks:
+        x = torch.cat((x, skips.pop()), dim=1)
+        x = block1(x, t_emb)
 
-            x = upsample(x)  # Upsample feature maps
+        x = torch.cat((x, skips.pop()), dim=1)
+        x = block2(x, t_emb)
+        x = attn(x)
 
-        # Final processing
-        x = self.out_block(
-            torch.cat((x, r), dim=1), t_emb
-        )  # Last residual block with skip connection
-        out = self.conv_out(x)  # Final convolution to generate RGB output
+        x = upsample(x)
 
-        return {"sample": out}  # Return output image
+    # Final processing
+    x = self.out_block(torch.cat((x, r), dim=1), t_emb)
+    out = self.conv_out(x)
+
+    if guidance_scale > 1.0:
+        # Classifier-Free Guidance: Compute unconditioned output
+        unconditioned_out = self.forward(sample, timesteps, metadata=None, guidance_scale=1.0)["sample"]
+
+        # CFG formula: mix conditioned and unconditioned predictions
+        out = unconditioned_out + guidance_scale * (out - unconditioned_out)
+
+    return {"sample": out}
