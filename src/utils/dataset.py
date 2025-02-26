@@ -103,19 +103,10 @@ class PokemonDataset(Dataset):
             id_data = self.metadata.get(pkmn_id, {})
             type_set.update(id_data.get("types", []))
             egg_group_set.update(id_data.get("egg_groups", []))
-            # color_set.update([id_data.get("color", "")])
-            # shape_set.update([id_data.get("shape", "")])
 
         if self.transform:
             image = self.transform(image)
 
-        # Bring these back in if model performs well enough
-        # self.encode_one_hot(
-        #     color_set, self.color_to_idx, len(self.colors)
-        # ),
-        # self.encode_one_hot(
-        #     shape_set, self.shape_to_idx, len(self.shapes)
-        # ),
         metadata = torch.cat(
             (
                 self.encode_one_hot(type_set, self.type_to_idx, len(self.types)),
@@ -124,6 +115,11 @@ class PokemonDataset(Dataset):
                 ),
             )
         )
+        # Classifier-Free Guidance probability
+        drop_prob = 0.1  # 10% of the time, we drop metadata
+        use_conditioning = torch.rand(1) > drop_prob
+
+        metadata = metadata * use_conditioning  # Set to zero vector if dropped
 
         return {
             "image": image,

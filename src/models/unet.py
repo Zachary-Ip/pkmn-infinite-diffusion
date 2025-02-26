@@ -240,76 +240,80 @@ class UNet(nn.Module):
         )  # Output RGB image
 
     def forward(self, sample, timesteps, metadata=None, guidance_scale=1.0):
-    """
-    Forward pass of the U-Net with optional Classifier-Free Guidance.
+        """
+        Forward pass of the U-Net with optional Classifier-Free Guidance.
 
-    Args:
-        sample (Tensor): Input image tensor (B, C, H, W).
-        timesteps (Tensor): Current diffusion timestep (B,).
-        metadata (Tensor, optional): One-hot encoded metadata (B, metadata_dim). Can be None for CFG.
-        guidance_scale (float): Strength of classifier-free guidance (default 1.0, no guidance).
+        Args:
+            sample (Tensor): Input image tensor (B, C, H, W).
+            timesteps (Tensor): Current diffusion timestep (B,).
+            metadata (Tensor, optional): One-hot encoded metadata (B, metadata_dim). Can be None for CFG.
+            guidance_scale (float): Strength of classifier-free guidance (default 1.0, no guidance).
 
-    Returns:
-        dict: Output sample tensor with generated image.
-    """
+        Returns:
+            dict: Output sample tensor with generated image.
+        """
 
-    if not torch.is_tensor(timesteps):
-        timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor(
+                [timesteps], dtype=torch.long, device=sample.device
+            )
 
-    timesteps = torch.flatten(timesteps)
-    timesteps = timesteps.broadcast_to(sample.shape[0])
+        timesteps = torch.flatten(timesteps)
+        timesteps = timesteps.broadcast_to(sample.shape[0])
 
-    # Compute time embedding
-    t_emb = sinusoidal_embedding(timesteps, self.hidden_dims[0])
-    t_emb = self.time_embedding(t_emb)
+        # Compute time embedding
+        t_emb = sinusoidal_embedding(timesteps, self.hidden_dims[0])
+        t_emb = self.time_embedding(t_emb)
 
-    if metadata is not None:
-        # Compute metadata embedding and add to time embedding
-        m_emb = self.metadata_embedding(metadata)
-        t_emb = t_emb + m_emb  # Feature addition for conditioning
+        if metadata is not None:
+            # Compute metadata embedding and add to time embedding
+            m_emb = self.metadata_embedding(metadata)
+            t_emb = t_emb + m_emb  # Feature addition for conditioning
 
-    # Initial convolution to process the input image
-    x = self.init_conv(sample)
-    r = x.clone()  # Save for residual connection
+        # Initial convolution to process the input image
+        x = self.init_conv(sample)
+        r = x.clone()  # Save for residual connection
 
-    skips = []
+        skips = []
 
-    # Encoder (downsampling)
-    for block1, block2, attn, downsample in self.down_blocks:
-        x = block1(x, t_emb)
-        skips.append(x)
+        # Encoder (downsampling)
+        for block1, block2, attn, downsample in self.down_blocks:
+            x = block1(x, t_emb)
+            skips.append(x)
 
-        x = block2(x, t_emb)
-        x = attn(x)
-        skips.append(x)
+            x = block2(x, t_emb)
+            x = attn(x)
+            skips.append(x)
 
-        x = downsample(x)
+            x = downsample(x)
 
-    # Bottleneck processing
-    x = self.mid_block1(x, t_emb)
-    x = self.mid_attn(x)
-    x = self.mid_block2(x, t_emb)
+        # Bottleneck processing
+        x = self.mid_block1(x, t_emb)
+        x = self.mid_attn(x)
+        x = self.mid_block2(x, t_emb)
 
-    # Decoder (upsampling)
-    for block1, block2, attn, upsample in self.up_blocks:
-        x = torch.cat((x, skips.pop()), dim=1)
-        x = block1(x, t_emb)
+        # Decoder (upsampling)
+        for block1, block2, attn, upsample in self.up_blocks:
+            x = torch.cat((x, skips.pop()), dim=1)
+            x = block1(x, t_emb)
 
-        x = torch.cat((x, skips.pop()), dim=1)
-        x = block2(x, t_emb)
-        x = attn(x)
+            x = torch.cat((x, skips.pop()), dim=1)
+            x = block2(x, t_emb)
+            x = attn(x)
 
-        x = upsample(x)
+            x = upsample(x)
 
-    # Final processing
-    x = self.out_block(torch.cat((x, r), dim=1), t_emb)
-    out = self.conv_out(x)
+        # Final processing
+        x = self.out_block(torch.cat((x, r), dim=1), t_emb)
+        out = self.conv_out(x)
 
-    if guidance_scale > 1.0:
-        # Classifier-Free Guidance: Compute unconditioned output
-        unconditioned_out = self.forward(sample, timesteps, metadata=None, guidance_scale=1.0)["sample"]
+        if guidance_scale > 1.0:
+            # Classifier-Free Guidance: Compute unconditioned output
+            unconditioned_out = self.forward(
+                sample, timesteps, metadata=None, guidance_scale=1.0
+            )["sample"]
 
-        # CFG formula: mix conditioned and unconditioned predictions
-        out = unconditioned_out + guidance_scale * (out - unconditioned_out)
+            # CFG formula: mix conditioned and unconditioned predictions
+            out = unconditioned_out + guidance_scale * (out - unconditioned_out)
 
-    return {"sample": out}
+        return {"sample": out}

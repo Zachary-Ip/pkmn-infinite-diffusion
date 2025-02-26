@@ -135,6 +135,8 @@ class DDIMScheduler:
         eta=1.0,
         num_inference_steps=50,
         device=None,
+        guidance_scale=1,
+        metadata=None,
     ):
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         image = torch.randn(
@@ -144,9 +146,18 @@ class DDIMScheduler:
         self._set_timesteps(num_inference_steps)
 
         for t in tqdm(self.timesteps):
-            model_output = model(image, t)["sample"]
-            # predict previous mean of image x_t-1 and add variance depending on eta
-            # do x_t -> x_t-1
+            # Predict with conditioning
+            model_output_cond = model(image, t, metadata)["sample"]
+
+            # Predict without conditioning (unconditional output)
+            model_output_uncond = model(image, t, torch.zeros_like(metadata))["sample"]
+
+            # Apply guidance scale
+            model_output = model_output_uncond + guidance_scale * (
+                model_output_cond - model_output_uncond
+            )
+
+            # Step to next timestep
             image = self._step(model_output, t, image, eta, generator=generator)
 
         image = unnormalize_to_zero_to_one(image)

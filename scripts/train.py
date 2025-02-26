@@ -138,6 +138,8 @@ def main(args):
                         generator=generator,
                         eta=1.0,
                         batch_size=args.eval_batch_size,
+                        guidance_scale=args.guidance_scale,
+                        metadata=metadata,
                     )
 
                     save_images(generated_images, epoch, args)
@@ -218,6 +220,7 @@ if __name__ == "__main__":
     )
     fp16_precision = config.getboolean("settings", "fp16_precision", fallback=False)
     gamma = config.getfloat("settings", "gamma", fallback=0.996)
+    guidance_scale = config.getfloat("settings", "guidance_scale", fallback=1)
     # If both are not provided in the config file, raise an error
     if dataset_name is None and dataset_path is None:
         raise ValueError(
@@ -257,6 +260,7 @@ if __name__ == "__main__":
             pretrained_model_path,
             fp16_precision,
             gamma,
+            guidance_scale,
         ):
             self.dataset_name = dataset_name
             self.dataset_path = dataset_path
@@ -285,6 +289,7 @@ if __name__ == "__main__":
             self.pretrained_model_path = pretrained_model_path
             self.fp16_precision = fp16_precision
             self.gamma = gamma
+            self.guidance_scale = guidance_scale
 
     # Initialize and pass arguments to main
     config_args = Args(
@@ -315,5 +320,6 @@ if __name__ == "__main__":
         pretrained_model_path,
         fp16_precision,
         gamma,
+        guidance_scale,
     )
     main(config_args)
