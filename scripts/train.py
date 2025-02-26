@@ -93,6 +93,8 @@ def main(args):
         losses_log = 0
         for step, batch in enumerate(train_dataloader):
             orig_images = batch["image"].to(device)
+            type_encoding = batch["type_encoding"].to(device)
+            egg_group_encoding = batch["egg_group_encoding"].to(device)
 
             batch_size = orig_images.shape[0]
             noise = torch.randn(orig_images.shape).to(device)
@@ -102,7 +104,9 @@ def main(args):
             noisy_images = noise_scheduler.add_noise(orig_images, noise, timesteps)
             optimizer.zero_grad()
             with autocast(enabled=args.fp16_precision, device_type=device.type):
-                noise_pred = model(noisy_images, timesteps)["sample"]
+                noise_pred = model(
+                    noisy_images, timesteps, type_encoding, egg_group_encoding
+                )["sample"]
                 loss = F.l1_loss(noise_pred, noise)
             scaler.scale(loss).backward()
             scaler.step(optimizer)

@@ -113,8 +113,9 @@ class UNet(nn.Module):
     def __init__(
         self,
         in_channels,
-        hidden_dims=[64, 128, 256],  # removed 512 dimension
+        hidden_dims=[64, 128, 256],
         image_size=64,
+        metadata_dim=16,  # Adjust based on the number of categories
         use_flash_attn=False,
     ):
         super(UNet, self).__init__()
@@ -126,8 +127,16 @@ class UNet(nn.Module):
         timestep_input_dim = hidden_dims[0]
         time_embed_dim = timestep_input_dim * 4
 
+        # Time embedding
         self.time_embedding = nn.Sequential(
             nn.Linear(timestep_input_dim, time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(time_embed_dim, time_embed_dim),
+        )
+
+        # Metadata embedding layer (MLP)
+        self.metadata_embedding = nn.Sequential(
+            nn.Linear(metadata_dim, time_embed_dim),
             nn.SiLU(),
             nn.Linear(time_embed_dim, time_embed_dim),
         )
@@ -137,7 +146,6 @@ class UNet(nn.Module):
         )
 
         down_blocks = []
-
         in_dim = hidden_dims[0]
         for idx, hidden_dim in enumerate(hidden_dims[1:]):
             is_last = idx >= (len(hidden_dims) - 2)
@@ -186,7 +194,7 @@ class UNet(nn.Module):
         )
         self.conv_out = nn.Conv2d(hidden_dims[0], out_channels=3, kernel_size=1)
 
-    def forward(self, sample, timesteps):
+    def forward(self, sample, timesteps, metadata):
         if not torch.is_tensor(timesteps):
             timesteps = torch.tensor(
                 [timesteps], dtype=torch.long, device=sample.device
@@ -195,8 +203,13 @@ class UNet(nn.Module):
         timesteps = torch.flatten(timesteps)
         timesteps = timesteps.broadcast_to(sample.shape[0])
 
+        # Compute time embedding
         t_emb = sinusoidal_embedding(timesteps, self.hidden_dims[0])
         t_emb = self.time_embedding(t_emb)
+
+        # Compute metadata embedding and add it to time embedding
+        m_emb = self.metadata_embedding(metadata)
+        t_emb = t_emb + m_emb  # Feature addition
 
         x = self.init_conv(sample)
         r = x.clone()

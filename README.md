@@ -47,3 +47,12 @@ pkmn-infinite-diffusion/
 │── .gitignore                 # Ignore unnecessary files (datasets, checkpoints, etc.)
 │── LICENSE                    # Licensing information
 ```
+
+
+Considerations for future directions (changing how pokemon type is embedded)
+Comparison Table
+Method	Pros	Cons	Best for
+Direct Concatenation	Simple, fast, easy to implement	Rigid, inefficient if many categories	Simple conditioning (e.g., adding Pokémon type as an extra channel)
+Feature Addition	Efficient, flexible	Less direct control	Global conditioning without excessive model changes
+Cross-Attention	Highly flexible, dynamic conditioning	Computationally expensive, harder to train	Complex conditioning tasks, such as Pokémon type + egg group affecting fine details
+FiLM	Expressive, efficient	Requires careful tuning	Tasks where different metadata affect different aspects of generation

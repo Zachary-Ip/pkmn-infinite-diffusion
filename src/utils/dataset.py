@@ -33,14 +33,14 @@ class PokemonDataset(Dataset):
         self.metadata = self.read_data(metadata_folder, "metadata.json")
         self.types = self.read_data(metadata_folder, "types.csv")
         self.egg_groups = self.read_data(metadata_folder, "egg_groups.csv")
-        self.colors = self.read_data(metadata_folder, "colors.csv")
-        self.shapes = self.read_data(metadata_folder, "shapes.csv")
+        # self.colors = self.read_data(metadata_folder, "colors.csv")
+        # self.shapes = self.read_data(metadata_folder, "shapes.csv")
 
         # Create mappings for one-hot encoding
         self.type_to_idx = {t: i for i, t in enumerate(self.types)}
         self.egg_group_to_idx = {e: i for i, e in enumerate(self.egg_groups)}
-        self.color_to_idx = {c: i for i, c in enumerate(self.colors)}
-        self.shape_to_idx = {s: i for i, s in enumerate(self.shapes)}
+        # self.color_to_idx = {c: i for i, c in enumerate(self.colors)}
+        # self.shape_to_idx = {s: i for i, s in enumerate(self.shapes)}
 
     def get_valid_images(self):
         return [
@@ -103,8 +103,8 @@ class PokemonDataset(Dataset):
             id_data = self.metadata.get(pkmn_id, {})
             type_set.update(id_data.get("types", []))
             egg_group_set.update(id_data.get("egg_groups", []))
-            color_set.update([id_data.get("color", "")])
-            shape_set.update([id_data.get("shape", "")])
+            # color_set.update([id_data.get("color", "")])
+            # shape_set.update([id_data.get("shape", "")])
 
         if self.transform:
             image = self.transform(image)
@@ -117,10 +117,11 @@ class PokemonDataset(Dataset):
             "egg_group_encoding": self.encode_one_hot(
                 egg_group_set, self.egg_group_to_idx, len(self.egg_groups)
             ),
-            "color_encoding": self.encode_one_hot(
-                color_set, self.color_to_idx, len(self.colors)
-            ),
-            "shape_encoding": self.encode_one_hot(
-                shape_set, self.shape_to_idx, len(self.shapes)
-            ),
+            # Bring these back in if model performs well enough
+            # "color_encoding": self.encode_one_hot(
+            #     color_set, self.color_to_idx, len(self.colors)
+            # ),
+            # "shape_encoding": self.encode_one_hot(
+            #     shape_set, self.shape_to_idx, len(self.shapes)
+            # ),
         }
