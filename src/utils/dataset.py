@@ -62,11 +62,12 @@ class PokemonDataset(Dataset):
         path = os.path.join(dir, file)
         _, ext = os.path.splitext(file)
         with open(path, "r") as f:
-            if ext == "json":
+            if ext == ".json":
                 data = json.load(f)
-            elif ext == "csv":
+            elif ext == ".csv":
                 reader = csv.reader(f)
-                data = {row[0] for row in reader}
+                data = [row for row in reader]
+
             else:
                 raise ValueError(f"File extension for {file} recognized")
         return data
@@ -104,10 +105,10 @@ class PokemonDataset(Dataset):
 
         for id in pkmn_ids:
             id_data = self.metadata.get(id)
-            type_set.add(id_data.get("types"))
-            egg_group_set.add(id_data.get("egg_groups"))
-            color_set.add(id_data.get("color"))
-            shape_set.add(id_data.get("shape"))
+            type_set.update(id_data.get("types"))
+            egg_group_set.update(id_data.get("egg_groups"))
+            color_set.update(id_data.get("color"))
+            shape_set.update(id_data.get("shape"))
 
         if self.transform:
             image = self.transform(image)
@@ -118,7 +119,7 @@ class PokemonDataset(Dataset):
                 list(type_set), self.type_to_idx, len(self.types)
             ),
             "egg_group_encoding": self.encode_one_hot(
-                list(egg_group_set), self.egg_group_to_idx_to_idx, len(self.egg_groups)
+                list(egg_group_set), self.egg_group_to_idx, len(self.egg_groups)
             ),
             "color_encoding": self.encode_one_hot(
                 list(color_set), self.color_to_idx, len(self.colors)

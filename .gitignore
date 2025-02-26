@@ -128,5 +128,4 @@ dmypy.json
 cython_debug/
 
 *.ipynb
-*.ipynb
 /notebooks
