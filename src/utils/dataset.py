@@ -109,19 +109,23 @@ class PokemonDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
+        # Bring these back in if model performs well enough
+        # self.encode_one_hot(
+        #     color_set, self.color_to_idx, len(self.colors)
+        # ),
+        # self.encode_one_hot(
+        #     shape_set, self.shape_to_idx, len(self.shapes)
+        # ),
+        metadata = torch.cat(
+            (
+                self.encode_one_hot(type_set, self.type_to_idx, len(self.types)),
+                self.encode_one_hot(
+                    egg_group_set, self.egg_group_to_idx, len(self.egg_groups)
+                ),
+            )
+        )
+
         return {
             "image": image,
-            "type_encoding": self.encode_one_hot(
-                type_set, self.type_to_idx, len(self.types)
-            ),
-            "egg_group_encoding": self.encode_one_hot(
-                egg_group_set, self.egg_group_to_idx, len(self.egg_groups)
-            ),
-            # Bring these back in if model performs well enough
-            # "color_encoding": self.encode_one_hot(
-            #     color_set, self.color_to_idx, len(self.colors)
-            # ),
-            # "shape_encoding": self.encode_one_hot(
-            #     shape_set, self.shape_to_idx, len(self.shapes)
-            # ),
+            "metadata": metadata,
         }
