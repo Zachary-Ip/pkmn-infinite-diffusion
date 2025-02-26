@@ -119,7 +119,7 @@ class UNet(nn.Module):
             256,
         ],  # Defines the number of feature channels at different levels
         image_size=64,
-        metadata_dim=20,  # Size of the metadata one-hot vector (adjust as needed)
+        metadata_dim=18,  # Size of the metadata one-hot vector (adjust as needed)
         use_flash_attn=False,  # Whether to use efficient attention mechanism
     ):
         """

@@ -64,7 +64,7 @@ def main(args):
             ),  # normalize to [-1, 1] for faster convergence and numerical stability
         ]
     )
-    dataset = PokemonDataset(args.dataset_path, transform=transform)
+    dataset = PokemonDataset(args.dataset_path, args.metadata_path, transform=transform)
     train_dataloader = DataLoader(dataset, batch_size=args.train_batch_size)
     steps_per_epoch = len(train_dataloader)
     total_num_steps = (
@@ -158,7 +158,7 @@ def main(args):
                         out_path,
                     )
 
-            progress_bar.close()
+            # progress_bar.close()
             losses.append(losses_log / (step + 1))
 
 
@@ -187,6 +187,7 @@ if __name__ == "__main__":
         "settings", "dataset_name", fallback="pkmn-infinite-fusion-sprites"
     )
     dataset_path = config.get("settings", "dataset_path", fallback="./data/raw/")
+    metadata_path = config.get("settings", "metadata_path", fallback="./data/metadata/")
     hidden_dims = ast.literal_eval(
         config.get("settings", "hidden_dims", fallback="[64, 128, 256]")
     )
@@ -235,6 +236,7 @@ if __name__ == "__main__":
             self,
             dataset_name,
             dataset_path,
+            metadata_path,
             hidden_dims,
             n_timesteps,
             n_inference_timesteps,
@@ -264,6 +266,7 @@ if __name__ == "__main__":
         ):
             self.dataset_name = dataset_name
             self.dataset_path = dataset_path
+            self.metadata_path = metadata_path
             self.hidden_dims = hidden_dims
             self.n_timesteps = n_timesteps
             self.n_inference_timesteps = n_inference_timesteps
@@ -295,6 +298,7 @@ if __name__ == "__main__":
     config_args = Args(
         dataset_name,
         dataset_path,
+        metadata_path,
         hidden_dims,
         n_timesteps,
         n_inference_timesteps,
