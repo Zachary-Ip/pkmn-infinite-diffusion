@@ -113,132 +113,206 @@ class UNet(nn.Module):
     def __init__(
         self,
         in_channels,
-        hidden_dims=[64, 128, 256],
+        hidden_dims=[
+            64,
+            128,
+            256,
+        ],  # Defines the number of feature channels at different levels
         image_size=64,
-        metadata_dim=16,  # Adjust based on the number of categories
-        use_flash_attn=False,
+        metadata_dim=20,  # Size of the metadata one-hot vector (adjust as needed)
+        use_flash_attn=False,  # Whether to use efficient attention mechanism
     ):
+        """
+        UNet architecture for diffusion models with metadata conditioning.
+
+        Args:
+            in_channels (int): Number of input channels (e.g., 3 for RGB images).
+            hidden_dims (list): Feature map sizes at different stages of the U-Net.
+            image_size (int): Image resolution.
+            metadata_dim (int): Dimension of metadata one-hot vector (e.g., type & egg group).
+            use_flash_attn (bool): Flag to use flash attention for efficiency.
+        """
         super(UNet, self).__init__()
 
         self.sample_size = image_size
         self.in_channels = in_channels
         self.hidden_dims = hidden_dims
 
-        timestep_input_dim = hidden_dims[0]
-        time_embed_dim = timestep_input_dim * 4
+        timestep_input_dim = hidden_dims[0]  # Base feature size for time embeddings
+        time_embed_dim = timestep_input_dim * 4  # Expanded embedding size
 
-        # Time embedding
+        # Time embedding network (maps timesteps to a learned representation)
         self.time_embedding = nn.Sequential(
             nn.Linear(timestep_input_dim, time_embed_dim),
             nn.SiLU(),
             nn.Linear(time_embed_dim, time_embed_dim),
         )
 
-        # Metadata embedding layer (MLP)
+        # Metadata embedding network (maps metadata one-hot vector to a latent space)
         self.metadata_embedding = nn.Sequential(
             nn.Linear(metadata_dim, time_embed_dim),
             nn.SiLU(),
             nn.Linear(time_embed_dim, time_embed_dim),
         )
 
+        # Initial convolutional layer to process input image
         self.init_conv = nn.Conv2d(
             in_channels, out_channels=hidden_dims[0], kernel_size=3, stride=1, padding=1
         )
 
+        # Downsampling (encoder) blocks
         down_blocks = []
-        in_dim = hidden_dims[0]
+        in_dim = hidden_dims[0]  # First layer has the same channels as init_conv output
         for idx, hidden_dim in enumerate(hidden_dims[1:]):
-            is_last = idx >= (len(hidden_dims) - 2)
-            is_first = idx == 0
-            use_attn = True if use_flash_attn else not is_first
+            is_last = idx >= (len(hidden_dims) - 2)  # Is this the last down block?
+            is_first = idx == 0  # Is this the first down block?
+            use_attn = (
+                True if use_flash_attn else not is_first
+            )  # Apply attention except for first block
             down_blocks.append(
                 nn.ModuleList(
                     [
-                        ResidualBlock(in_dim, in_dim, time_embed_dim),
-                        ResidualBlock(in_dim, in_dim, time_embed_dim),
-                        get_attn_layer(in_dim, use_attn, use_flash_attn),
-                        get_downsample_layer(in_dim, hidden_dim, is_last),
+                        ResidualBlock(
+                            in_dim, in_dim, time_embed_dim
+                        ),  # Residual block 1
+                        ResidualBlock(
+                            in_dim, in_dim, time_embed_dim
+                        ),  # Residual block 2
+                        get_attn_layer(
+                            in_dim, use_attn, use_flash_attn
+                        ),  # Attention layer
+                        get_downsample_layer(
+                            in_dim, hidden_dim, is_last
+                        ),  # Downsample layer
                     ]
                 )
             )
-            in_dim = hidden_dim
+            in_dim = hidden_dim  # Update feature size for next block
 
         self.down_blocks = nn.ModuleList(down_blocks)
 
+        # Bottleneck (middle block)
         mid_dim = hidden_dims[-1]
-        self.mid_block1 = ResidualBlock(mid_dim, mid_dim, time_embed_dim)
-        self.mid_attn = Attention(mid_dim)
-        self.mid_block2 = ResidualBlock(mid_dim, mid_dim, time_embed_dim)
+        self.mid_block1 = ResidualBlock(
+            mid_dim, mid_dim, time_embed_dim
+        )  # Residual block
+        self.mid_attn = Attention(mid_dim)  # Self-attention layer
+        self.mid_block2 = ResidualBlock(
+            mid_dim, mid_dim, time_embed_dim
+        )  # Another residual block
 
+        # Upsampling (decoder) blocks
         up_blocks = []
-        in_dim = mid_dim
+        in_dim = mid_dim  # Start with highest feature size
         for idx, hidden_dim in enumerate(list(reversed(hidden_dims[:-1]))):
-            is_last = idx >= (len(hidden_dims) - 2)
-            use_attn = True if use_flash_attn else not is_last
+            is_last = idx >= (len(hidden_dims) - 2)  # Is this the last up block?
+            use_attn = (
+                True if use_flash_attn else not is_last
+            )  # Apply attention except last block
             up_blocks.append(
                 nn.ModuleList(
                     [
-                        ResidualBlock(in_dim + hidden_dim, in_dim, time_embed_dim),
-                        ResidualBlock(in_dim + hidden_dim, in_dim, time_embed_dim),
-                        get_attn_layer(in_dim, use_attn, use_flash_attn),
-                        get_upsample_layer(in_dim, hidden_dim, is_last),
+                        ResidualBlock(
+                            in_dim + hidden_dim, in_dim, time_embed_dim
+                        ),  # Residual block 1
+                        ResidualBlock(
+                            in_dim + hidden_dim, in_dim, time_embed_dim
+                        ),  # Residual block 2
+                        get_attn_layer(
+                            in_dim, use_attn, use_flash_attn
+                        ),  # Attention layer
+                        get_upsample_layer(
+                            in_dim, hidden_dim, is_last
+                        ),  # Upsample layer
                     ]
                 )
             )
-            in_dim = hidden_dim
+            in_dim = hidden_dim  # Update feature size for next block
 
         self.up_blocks = nn.ModuleList(up_blocks)
 
+        # Final residual block and output convolution
         self.out_block = ResidualBlock(
             hidden_dims[0] * 2, hidden_dims[0], time_embed_dim
         )
-        self.conv_out = nn.Conv2d(hidden_dims[0], out_channels=3, kernel_size=1)
+        self.conv_out = nn.Conv2d(
+            hidden_dims[0], out_channels=3, kernel_size=1
+        )  # Output RGB image
 
     def forward(self, sample, timesteps, metadata):
+        """
+        Forward pass of the U-Net.
+
+        Args:
+            sample (Tensor): Input image tensor (B, C, H, W).
+            timesteps (Tensor): Current diffusion timestep (B,).
+            metadata (Tensor): One-hot encoded metadata (B, metadata_dim).
+
+        Returns:
+            dict: Output sample tensor with generated image.
+        """
+        # Ensure timesteps is a tensor and has the correct shape
         if not torch.is_tensor(timesteps):
             timesteps = torch.tensor(
                 [timesteps], dtype=torch.long, device=sample.device
             )
 
-        timesteps = torch.flatten(timesteps)
-        timesteps = timesteps.broadcast_to(sample.shape[0])
+        timesteps = torch.flatten(timesteps)  # Flatten into (B,)
+        timesteps = timesteps.broadcast_to(
+            sample.shape[0]
+        )  # Ensure shape matches batch size
 
         # Compute time embedding
-        t_emb = sinusoidal_embedding(timesteps, self.hidden_dims[0])
-        t_emb = self.time_embedding(t_emb)
+        t_emb = sinusoidal_embedding(
+            timesteps, self.hidden_dims[0]
+        )  # Apply positional encoding
+        t_emb = self.time_embedding(t_emb)  # Pass through learned embedding MLP
 
         # Compute metadata embedding and add it to time embedding
-        m_emb = self.metadata_embedding(metadata)
-        t_emb = t_emb + m_emb  # Feature addition
+        m_emb = self.metadata_embedding(
+            metadata
+        )  # Convert metadata to same latent space
+        t_emb = (
+            t_emb + m_emb
+        )  # Feature addition: enrich time embedding with metadata information
 
+        # Initial convolution to process the input image
         x = self.init_conv(sample)
-        r = x.clone()
+        r = x.clone()  # Save for residual connection
 
-        skips = []
+        skips = []  # Store skip connections for U-Net
+
+        # Encoder (downsampling)
         for block1, block2, attn, downsample in self.down_blocks:
-            x = block1(x, t_emb)
-            skips.append(x)
+            x = block1(x, t_emb)  # Apply first residual block
+            skips.append(x)  # Store for skip connection
 
-            x = block2(x, t_emb)
-            x = attn(x)
-            skips.append(x)
+            x = block2(x, t_emb)  # Apply second residual block
+            x = attn(x)  # Apply attention (if enabled)
+            skips.append(x)  # Store for skip connection
 
-            x = downsample(x)
+            x = downsample(x)  # Downsample feature maps
 
-        x = self.mid_block1(x, t_emb)
-        x = self.mid_attn(x)
-        x = self.mid_block2(x, t_emb)
+        # Bottleneck processing
+        x = self.mid_block1(x, t_emb)  # Apply residual block
+        x = self.mid_attn(x)  # Apply attention
+        x = self.mid_block2(x, t_emb)  # Apply residual block
 
+        # Decoder (upsampling)
         for block1, block2, attn, upsample in self.up_blocks:
-            x = torch.cat((x, skips.pop()), dim=1)
-            x = block1(x, t_emb)
+            x = torch.cat((x, skips.pop()), dim=1)  # Skip connection
+            x = block1(x, t_emb)  # Apply residual block
 
-            x = torch.cat((x, skips.pop()), dim=1)
-            x = block2(x, t_emb)
-            x = attn(x)
+            x = torch.cat((x, skips.pop()), dim=1)  # Skip connection
+            x = block2(x, t_emb)  # Apply residual block
+            x = attn(x)  # Apply attention (if enabled)
 
-            x = upsample(x)
+            x = upsample(x)  # Upsample feature maps
 
-        x = self.out_block(torch.cat((x, r), dim=1), t_emb)
-        out = self.conv_out(x)
-        return {"sample": out}
+        # Final processing
+        x = self.out_block(
+            torch.cat((x, r), dim=1), t_emb
+        )  # Last residual block with skip connection
+        out = self.conv_out(x)  # Final convolution to generate RGB output
+
+        return {"sample": out}  # Return output image
