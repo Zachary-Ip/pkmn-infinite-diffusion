@@ -42,7 +42,7 @@ class PokemonDataset(Dataset):
         self.type_to_idx = {t: i for i, t in enumerate(self.types)}
         self.egg_group_to_idx = {e: i for i, e in enumerate(self.egg_groups)}
         self.color_to_idx = {t: i for i, t in enumerate(self.colors)}
-        self.shapes_group_to_idx = {e: i for i, e in enumerate(self.shapes)}
+        self.shape_to_idx = {e: i for i, e in enumerate(self.shapes)}
 
     def get_valid_images(self, folder):
         valid_images = []
@@ -74,6 +74,10 @@ class PokemonDataset(Dataset):
     def encode_one_hot(self, labels, label_to_idx, num_classes):
         """Convert a list of labels into a one-hot encoded tensor"""
         one_hot = torch.zeros(num_classes)
+        for label in labels:
+            if label in label_to_idx:
+                one_hot[label_to_idx[label]] = 1
+        return one_hot
 
     @staticmethod
     def get_ID_from_name(file):
@@ -89,8 +93,37 @@ class PokemonDataset(Dataset):
     def __getitem__(self, idx):
         img_path = os.path.join(self.image_folder, self.image_files[idx])
         image = Image.open(img_path).convert("RGB")
+
+        # Combine types and eggs from all pokemon
         pkmn_ids = self.get_ID_from_name(img_path)
+
+        type_set = set()
+        egg_group_set = set()
+        color_set = set()
+        shape_set = set()
+
+        for id in pkmn_ids:
+            id_data = self.metadata.get(id)
+            type_set.add(id_data.get("types"))
+            egg_group_set.add(id_data.get("egg_groups"))
+            color_set.add(id_data.get("color"))
+            shape_set.add(id_data.get("shape"))
 
         if self.transform:
             image = self.transform(image)
-        return {"image": image}
+
+        return {
+            "image": image,
+            "type_encoding": self.encode_one_hot(
+                list(type_set), self.type_to_idx, len(self.types)
+            ),
+            "egg_group_encoding": self.encode_one_hot(
+                list(egg_group_set), self.egg_group_to_idx_to_idx, len(self.egg_groups)
+            ),
+            "color_encoding": self.encode_one_hot(
+                list(color_set), self.color_to_idx, len(self.colors)
+            ),
+            "shape_encoding": self.encode_one_hot(
+                list(shape_set), self.shape_to_idx, len(self.shapes)
+            ),
+        }

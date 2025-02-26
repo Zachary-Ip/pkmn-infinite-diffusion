@@ -3,7 +3,7 @@ data/
 results/
 test_samples/
 trained_models/
-notebooks/ # May remove this to add tutorials
+*ipynb # May remove this to add tutorials
 *.pth
 
 
@@ -127,3 +127,6 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+*.ipynb
+*.ipynb
+/notebooks
