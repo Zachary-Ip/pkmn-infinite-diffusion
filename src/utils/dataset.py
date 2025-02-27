@@ -119,7 +119,7 @@ class PokemonDataset(Dataset):
         #     0,
         # )
         # Classifier-Free Guidance probability
-        drop_prob = 0.1  # 10% of the time, we drop metadata
+        drop_prob = 0.25  # 25% of the time, we drop metadata
         use_conditioning = torch.rand(1) > drop_prob
 
         metadata = metadata * use_conditioning  # Set to zero vector if dropped

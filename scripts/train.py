@@ -24,6 +24,7 @@ from src.utils.utils import save_images
 
 SEED = 123
 
+
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
@@ -91,6 +92,9 @@ def main(args):
         progress_bar = tqdm(total=steps_per_epoch)
         progress_bar.set_description(f"Epoch {epoch}")
         losses_log = 0
+
+        optimizer.zero_grad()  # Zero out gradients at the start of an epoch or batch accumulation cycle
+
         for step, batch in enumerate(train_dataloader):
             orig_images = batch["image"].to(device)
             metadata = batch["metadata"].to(device)
@@ -101,24 +105,35 @@ def main(args):
                 0, noise_scheduler.num_train_timesteps, (batch_size,), device=device
             ).long()
             noisy_images = noise_scheduler.add_noise(orig_images, noise, timesteps)
-            optimizer.zero_grad()
+
             with autocast(enabled=args.fp16_precision, device_type=device.type):
                 noise_pred = model(noisy_images, timesteps, metadata)["sample"]
-                loss = F.l1_loss(noise_pred, noise)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            ema.update_params(gamma)
-            gamma = ema.update_gamma(global_step)
-            if args.use_clip_grad:
-                clip_grad_norm_(model.parameters(), 1.0)
+                loss = (
+                    F.l1_loss(noise_pred, noise) / args.gradient_accumulation_steps
+                )  # Normalize loss
 
-            lr_scheduler.step()
+            scaler.scale(loss).backward()
+
+            # Only update weights when enough steps have been accumulated
+            if (step + 1) % args.gradient_accumulation_steps == 0:
+                if args.use_clip_grad:
+                    clip_grad_norm_(model.parameters(), 1.0)
+
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()  # Reset gradients after step
+                ema.update_params(gamma)
+                gamma = ema.update_gamma(global_step)
+                lr_scheduler.step()
+
             progress_bar.update(1)
-            losses_log += loss.detach().item()
+            losses_log += (
+                loss.detach().item() * args.gradient_accumulation_steps
+            )  # Undo normalization for logging
+
             logs = {
                 "loss_avg": losses_log / (step + 1),
-                "loss": loss.detach().item(),
+                "loss": loss.detach().item() * args.gradient_accumulation_steps,
                 "lr": lr_scheduler.get_last_lr()[0],
                 "step": global_step,
                 "gamma": gamma,
