@@ -1,4 +1,4 @@
-# Pokémon Diffusion Model
+# Pokémon Infinite Diffusion
 
 A small diffusion model implementing image generation of pokemon sprites using conditional tags of pokemon type, egg group, shape, and color. 
 
