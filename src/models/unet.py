@@ -254,6 +254,20 @@ class UNet(nn.Module):
             dict: Output sample tensor with generated image.
         """
 
+        # Helper function to apply checkpointing to any module that requires t_emb
+        def checkpoint_wrapper(module, x, t_emb):
+            def custom_forward(x_in, t_emb_in):
+                return module(x_in, t_emb_in)
+
+            return checkpoint(custom_forward, x, t_emb, use_reentrant=False)
+
+        # Helper function for modules that don't need t_emb (like attention)
+        def checkpoint_wrapper_simple(module, x):
+            def custom_forward(x_in):
+                return module(x_in)
+
+            return checkpoint(custom_forward, x, use_reentrant=False)
+
         if not torch.is_tensor(timesteps):
             timesteps = torch.tensor(
                 [timesteps], dtype=torch.long, device=sample.device
@@ -277,114 +291,140 @@ class UNet(nn.Module):
 
         skips = []
 
-        # Encoder (downsampling) with gradient checkpointing
+        # Encoder (downsampling)
         for block1, block2, attn, downsample in self.down_blocks:
-            # Apply checkpointing to the first block
-            def create_custom_forward_block1(module, t_embedding):
-                def custom_forward(x_tensor):
-                    return module(x_tensor, t_embedding)
-
-                return custom_forward
-
-            x = checkpoint(create_custom_forward_block1(block1, t_emb), x)
+            # First block
+            x = checkpoint_wrapper(block1, x, t_emb)
             skips.append(x)
 
-            # Apply checkpointing to the second block
-            def create_custom_forward_block2(module, t_embedding):
-                def custom_forward(x_tensor):
-                    return module(x_tensor, t_embedding)
-
-                return custom_forward
-
-            x = checkpoint(create_custom_forward_block2(block2, t_emb), x)
-
-            # Apply attention with checkpointing
-            def custom_forward_attn(x_tensor):
-                return attn(x_tensor)
-
-            x = checkpoint(custom_forward_attn, x)
+            # Second block
+            x = checkpoint_wrapper(block2, x, t_emb)
+            x = checkpoint_wrapper_simple(attn, x)
             skips.append(x)
 
-            # Downsampling is typically less memory-intensive, can skip checkpointing
+            # Downsample (less complex, no need for checkpointing)
             x = downsample(x)
 
-        # Bottleneck processing with checkpointing
-        def create_custom_forward_mid(module, t_embedding):
-            def custom_forward(x_tensor):
-                return module(x_tensor, t_embedding)
+        # Bottleneck processing
+        x = checkpoint_wrapper(self.mid_block1, x, t_emb)
+        x = checkpoint_wrapper_simple(self.mid_attn, x)
+        x = checkpoint_wrapper(self.mid_block2, x, t_emb)
 
-            return custom_forward
-
-        x = checkpoint(create_custom_forward_mid(self.mid_block1, t_emb), x)
-
-        def custom_forward_mid_attn(x_tensor):
-            return self.mid_attn(x_tensor)
-
-        x = checkpoint(custom_forward_mid_attn, x)
-        x = checkpoint(create_custom_forward_mid(self.mid_block2, t_emb), x)
-
-        # Decoder (upsampling) with gradient checkpointing
+        # Decoder (upsampling)
         for block1, block2, attn, upsample in self.up_blocks:
-            # Get skip connection
-            skip_connection = skips.pop()
+            # Handle first skip connection and first block
+            x = torch.cat((x, skips.pop()), dim=1)
+            x = checkpoint_wrapper(block1, x, t_emb)
 
-            # Custom checkpoint function for first block with concatenation
-            def create_custom_forward_up1(module, skip, t_embedding):
-                def custom_forward(x_tensor):
-                    x_cat = torch.cat((x_tensor, skip), dim=1)
-                    return module(x_cat, t_embedding)
+            # Handle second skip connection and second block
+            x = torch.cat((x, skips.pop()), dim=1)
+            x = checkpoint_wrapper(block2, x, t_emb)
+            x = checkpoint_wrapper_simple(attn, x)
 
-                return custom_forward
-
-            x = checkpoint(create_custom_forward_up1(block1, skip_connection, t_emb), x)
-
-            # Get second skip connection
-            skip_connection = skips.pop()
-
-            # Custom checkpoint function for second block with concatenation
-            def create_custom_forward_up2(module, skip, t_embedding):
-                def custom_forward(x_tensor):
-                    x_cat = torch.cat((x_tensor, skip), dim=1)
-                    return module(x_cat, t_embedding)
-
-                return custom_forward
-
-            x = checkpoint(create_custom_forward_up2(block2, skip_connection, t_emb), x)
-
-            # Apply attention with checkpointing
-            def custom_forward_up_attn(x_tensor):
-                return attn(x_tensor)
-
-            x = checkpoint(custom_forward_up_attn, x)
-
-            # Upsampling is typically less memory-intensive
+            # Upsample (less complex, no need for checkpointing)
             x = upsample(x)
 
         # Final processing
-        def create_custom_forward_out(module, residual, t_embedding):
-            def custom_forward(x_tensor):
-                x_cat = torch.cat((x_tensor, residual), dim=1)
-                return module(x_cat, t_embedding)
-
-            return custom_forward
-
-        x = checkpoint(create_custom_forward_out(self.out_block, r, t_emb), x)
+        x = torch.cat((x, r), dim=1)
+        x = checkpoint_wrapper(self.out_block, x, t_emb)
         out = self.conv_out(x)
 
-        if guidance_scale > 1.0:
-            # For guidance, we need to compute the unconditioned output
-            # Note: We can't use checkpointing for the recursive call
-            with torch.no_grad():  # Use no_grad to save more memory
-                # Enable evaluation mode to disable dropout, etc.
-                self.eval()
-                # Compute unconditioned output - store in CPU if needed to save GPU memory
-                unconditioned_out = self.forward(
-                    sample, timesteps, metadata=None, guidance_scale=1.0
+        if guidance_scale > 1.0 and metadata is not None:
+            # For CFG, we need to compute the unconditioned output
+            # Store the current model state
+            training = self.training
+
+            # Set to eval mode temporarily to save memory
+            self.eval()
+
+            # Use torch.no_grad to save even more memory
+            with torch.no_grad():
+                # Create a separate computation path without checkpointing
+                unconditioned_sample = sample.detach()  # Detach to save memory
+                unconditioned_timesteps = timesteps.detach()  # Detach to save memory
+
+                # Forward pass without metadata (unconditioned)
+                unconditioned_output = self.forward_without_checkpointing(
+                    unconditioned_sample,
+                    unconditioned_timesteps,
+                    metadata=None,
+                    guidance_scale=1.0,
                 )["sample"]
-                # Return to training mode
+
+                # Recompute the gradients only for the mixed prediction
+                unconditioned_output = (
+                    unconditioned_output.detach()
+                )  # Detach to save memory
+
+            # Restore the model state
+            if training:
                 self.train()
 
-            # CFG formula: mix conditioned and unconditioned predictions
-            out = unconditioned_out + guidance_scale * (out - unconditioned_out)
+            # Apply CFG formula
+            out = unconditioned_output + guidance_scale * (out - unconditioned_output)
+
+        return {"sample": out}
+
+    def forward_without_checkpointing(
+        self, sample, timesteps, metadata=None, guidance_scale=1.0
+    ):
+        """
+        Forward pass without gradient checkpointing - used for unconditioned generation in CFG.
+        This is identical to the original forward pass to avoid any dimension mismatches.
+        """
+        # This is your original forward pass code without modifications
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor(
+                [timesteps], dtype=torch.long, device=sample.device
+            )
+
+        timesteps = torch.flatten(timesteps)
+        timesteps = timesteps.broadcast_to(sample.shape[0])
+
+        # Compute time embedding
+        t_emb = sinusoidal_embedding(timesteps, self.hidden_dims[0])
+        t_emb = self.time_embedding(t_emb)
+
+        if metadata is not None:
+            # Compute metadata embedding and add to time embedding
+            m_emb = self.metadata_embedding(metadata)
+            t_emb = t_emb + m_emb  # Feature addition for conditioning
+
+        # Initial convolution to process the input image
+        x = self.init_conv(sample)
+        r = x.clone()  # Save for residual connection
+
+        skips = []
+
+        # Encoder (downsampling)
+        for block1, block2, attn, downsample in self.down_blocks:
+            x = block1(x, t_emb)
+            skips.append(x)
+
+            x = block2(x, t_emb)
+            x = attn(x)
+            skips.append(x)
+
+            x = downsample(x)
+
+        # Bottleneck processing
+        x = self.mid_block1(x, t_emb)
+        x = self.mid_attn(x)
+        x = self.mid_block2(x, t_emb)
+
+        # Decoder (upsampling)
+        for block1, block2, attn, upsample in self.up_blocks:
+            x = torch.cat((x, skips.pop()), dim=1)
+            x = block1(x, t_emb)
+
+            x = torch.cat((x, skips.pop()), dim=1)
+            x = block2(x, t_emb)
+            x = attn(x)
+
+            x = upsample(x)
+
+        # Final processing
+        x = self.out_block(torch.cat((x, r), dim=1), t_emb)
+        out = self.conv_out(x)
 
         return {"sample": out}

@@ -49,9 +49,11 @@ After downloading `InfiniteFusion.zip`, move the sprite to `/data/raw/`.
 
 ### Clean the data
 
+`poetry run python scripts/preprocess.py`
+
 Sprites have inconsistent transparency and background colors. This model trains on `RGB` format `.png` files. Unify the formatting and backgrounds of the training data with this script:
 
-`poetry run python scripts/preprocess.py`
+
 
 ## Generate metadata labels
 
