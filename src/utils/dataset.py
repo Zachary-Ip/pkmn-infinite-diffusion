@@ -99,7 +99,7 @@ class PokemonDataset(Dataset):
     def __getitem__(self, idx):
         img_name = self.image_files[idx]
         img_path = self.image_folder / img_name
-        image = Image.open(img_path)
+        image = Image.open(img_path).convert("RGB")
 
         # Extract Pokémon IDs
         pkmn_ids = self.get_ID_from_name(img_name)
