@@ -4,9 +4,9 @@ import torch
 from einops.layers.torch import Rearrange
 from torch import nn
 from torch.nn import functional as F
+from torch.utils.checkpoint import checkpoint
 
 from src.models.attention import Attention
-from torch.utils.checkpoint import checkpoint
 
 
 def get_downsample_layer(in_dim, hidden_dim, is_last):
