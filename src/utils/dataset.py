@@ -16,15 +16,9 @@ config = OmegaConf.load("configs/train.yaml")
 # Define Transformations (Resize + Normalize)
 transform = transforms.Compose(
     [
-        transforms.RandomResizedCrop(
-            config.model.image_size, scale=(0.8, 1.0)
-        ),  # Crop & resize
-        transforms.RandomHorizontalFlip(p=0.5),  # Flip images
-        transforms.RandomRotation(degrees=10),  # Rotate slightly
         transforms.ColorJitter(
             brightness=0.2, contrast=0.2, saturation=0.2
         ),  # Adjust colors
-        transforms.GaussianBlur(kernel_size=3),  # Add slight blur
         transforms.ToTensor(),  # Convert to tensor
         transforms.Normalize((0.5,), (0.5,)),  # Normalize
     ]
