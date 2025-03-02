@@ -16,11 +16,8 @@ config = OmegaConf.load("configs/train.yaml")
 # Define Transformations (Resize + Normalize)
 transform = transforms.Compose(
     [
-        transforms.ColorJitter(
-            brightness=0.2, contrast=0.2, saturation=0.2
-        ),  # Adjust colors
         transforms.ToTensor(),  # Convert to tensor
-        transforms.Normalize((0.5,), (0.5,)),  # Normalize
+        transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),  # Normalize
     ]
 )
 
@@ -34,15 +31,9 @@ class PokemonDataset(Dataset):
         # Load metadata
         self.metadata = self.read_data(metadata_folder, "metadata.json")
         self.types = self.read_data(metadata_folder, "types.csv")
-        # self.egg_groups = self.read_data(metadata_folder, "egg_groups.csv")
-        # self.colors = self.read_data(metadata_folder, "colors.csv")
-        # self.shapes = self.read_data(metadata_folder, "shapes.csv")
 
         # Create mappings for one-hot encoding
         self.type_to_idx = {t: i for i, t in enumerate(self.types)}
-        # self.egg_group_to_idx = {e: i for i, e in enumerate(self.egg_groups)}
-        # self.color_to_idx = {c: i for i, c in enumerate(self.colors)}
-        # self.shape_to_idx = {s: i for i, s in enumerate(self.shapes)}
 
     def get_valid_images(self):
         return [
@@ -109,18 +100,7 @@ class PokemonDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        metadata = self.encode_one_hot(
-            type_set, self.type_to_idx, len(self.types)
-        )  # torch.cat(
-        #     (
-        #         self.encode_one_hot(type_set, self.type_to_idx, len(self.types)),
-        #         self.encode_one_hot(
-        #             egg_group_set, self.egg_group_to_idx, len(self.egg_groups)
-        #         ),
-        #     ),
-        #     0,
-        # )
-        # Classifier-Free Guidance probability
+        metadata = self.encode_one_hot(type_set, self.type_to_idx, len(self.types))
         drop_prob = 0.25  # 25% of the time, we drop metadata
         use_conditioning = torch.rand(1) > drop_prob
 

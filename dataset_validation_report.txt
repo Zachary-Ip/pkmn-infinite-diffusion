@@ -1,0 +1,18 @@
+Dataset Validation Report for data/processed
+Total images checked: 170735
+
+IMAGE DIMENSIONS:
+  (288, 288): 170735 images (100.0%)
+
+IMAGE MODES:
+  RGB: 170735 images (100.0%)
+
+TRANSPARENCY:
+  Images with alpha channel: 0 (0.0%)
+
+BACKGROUND COLORS:
+  RGB(np.uint8(255), np.uint8(255), np.uint8(255)): 170649 images (99.9%)
+  Inconsistent corners: 81 images (0.0%)
+  RGB(np.uint8(0), np.uint8(0), np.uint8(0)): 3 images (0.0%)
+  RGB(np.uint8(6), np.uint8(5), np.uint8(4)): 1 images (0.0%)
+  RGB(np.uint8(252), np.uint8(252), np.uint8(252)): 1 images (0.0%)

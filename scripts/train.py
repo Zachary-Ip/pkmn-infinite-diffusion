@@ -61,7 +61,7 @@ def main(args):
             transforms.Resize((args.resolution, args.resolution)),
             transforms.ToTensor(),
             transforms.Normalize(
-                (0.5,), (0.5,)
+                [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
             ),  # normalize to [-1, 1] for faster convergence and numerical stability
         ]
     )
@@ -231,9 +231,10 @@ if __name__ == "__main__":
     use_clip_grad = config.getboolean("settings", "use_clip_grad", fallback=False)
     use_flash_attn = config.getboolean("settings", "use_flash_attn", fallback=False)
     logging_dir = config.get("settings", "logging_dir", fallback="logs")
-    pretrained_model_path = ast.literal_eval(
-        config.get("settings", "pretrained_model_path", fallback=None)
+    pretrained_model_path = config.get(
+        "settings", "pretrained_model_path", fallback=None
     )
+
     fp16_precision = config.getboolean("settings", "fp16_precision", fallback=False)
     gamma = config.getfloat("settings", "gamma", fallback=0.996)
     guidance_scale = config.getfloat("settings", "guidance_scale", fallback=1)
