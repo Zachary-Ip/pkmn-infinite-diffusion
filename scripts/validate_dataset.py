@@ -1,11 +1,12 @@
-import os
-from pathlib import Path
 import argparse
-from PIL import Image
-import numpy as np
+import os
 from collections import Counter
-from tqdm import tqdm
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+from tqdm import tqdm
 
 
 def validate_image_dataset(

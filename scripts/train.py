@@ -1,7 +1,9 @@
 import argparse
 import ast
 import configparser
+import gc
 import os
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -24,14 +26,189 @@ from src.utils.utils import save_images
 
 SEED = 123
 
-
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
 
 
-def main(args):
+# CPU Optimizer States Implementation
+class CPUAdamW(torch.optim.AdamW):
+    """AdamW that keeps states on CPU to save GPU memory"""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Initialize state dict
+        self.state_on_cpu = {}
+
+    def step(self, closure=None):
+        with torch.no_grad():
+            # Store original states
+            cpu_state_backup = {}
+
+            # Move optimizer states to CPU before the optimizer step
+            for group in self.param_groups:
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+
+                    if p in self.state:
+                        # Save the state
+                        cpu_state_backup[p] = self.state[p]
+
+                        # If state exists on CPU, use it
+                        if p in self.state_on_cpu:
+                            # Copy state from CPU to GPU for the step
+                            for state_name, state_val in self.state_on_cpu[p].items():
+                                self.state[p][state_name] = state_val.to(p.device)
+
+            # Perform the original optimizer step
+            loss = super().step(closure)
+
+            # Move updated states to CPU and free GPU memory
+            for group in self.param_groups:
+                for p in group["params"]:
+                    if p.grad is None:
+                        continue
+
+                    if p in self.state:
+                        # Initialize CPU state if needed
+                        if p not in self.state_on_cpu:
+                            self.state_on_cpu[p] = {}
+
+                        # Copy each state tensor to CPU
+                        for state_name, state_val in self.state[p].items():
+                            if isinstance(state_val, torch.Tensor):
+                                self.state_on_cpu[p][
+                                    state_name
+                                ] = state_val.detach().cpu()
+
+                        # Restore original state (to maintain PyTorch optimizer's expectations)
+                        if p in cpu_state_backup:
+                            self.state[p] = cpu_state_backup[p]
+
+            return loss
+
+
+# Implementation of activation offloading context manager
+class ActivationOffloader:
+    def __init__(self, threshold_mb=100):
+        self.threshold_mb = threshold_mb
+        self.saved_tensors = {}
+        self.hooks = []
+
+    def __enter__(self):
+        # Register hooks for all modules' forward functions
+        def forward_pre_hook(module, input):
+            # Skip small tensors
+            if not isinstance(input, tuple) or not all(
+                isinstance(i, torch.Tensor) for i in input
+            ):
+                return
+
+            total_size = sum(
+                i.nelement() * i.element_size()
+                for i in input
+                if isinstance(i, torch.Tensor)
+            )
+            # Only offload large activations (above threshold)
+            if total_size > self.threshold_mb * 1024 * 1024:
+                module_id = id(module)
+                cpu_tensors = []
+                for tensor in input:
+                    if isinstance(tensor, torch.Tensor) and tensor.requires_grad:
+                        # Store an offloaded version
+                        cpu_tensor = tensor.detach().cpu()
+                        cpu_tensors.append(cpu_tensor)
+                        # Keep a reference to avoid garbage collection
+                        self.saved_tensors[module_id] = cpu_tensors
+
+        def forward_hook(module, input, output):
+            module_id = id(module)
+            # Clean up any saved tensors that are no longer needed
+            if module_id in self.saved_tensors:
+                del self.saved_tensors[module_id]
+                gc.collect()
+
+        # Register hooks for all modules
+        def register_hooks(model):
+            for name, module in model.named_modules():
+                if hasattr(module, "forward"):
+                    pre_hook = module.register_forward_pre_hook(forward_pre_hook)
+                    hook = module.register_forward_hook(forward_hook)
+                    self.hooks.append(pre_hook)
+                    self.hooks.append(hook)
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Remove all hooks
+        for hook in self.hooks:
+            hook.remove()
+        self.hooks = []
+        # Clear all saved tensors
+        self.saved_tensors.clear()
+        gc.collect()
+
+
+# Parameter offloading context manager
+class ParameterOffloader:
+    def __init__(self, model, device="cuda", fraction_on_cpu=0.3):
+        """
+        Offloads a fraction of model parameters to CPU based on depth in the network.
+
+        Args:
+            model: The PyTorch model
+            device: The primary device (default: 'cuda')
+            fraction_on_cpu: Fraction of total parameters to offload (0.0-1.0)
+        """
+        self.model = model
+        self.device = device
+        self.fraction_on_cpu = fraction_on_cpu
+        self.original_devices = {}
+
+    def __enter__(self):
+        # Count total number of parameters
+        total_params = sum(p.numel() for p in self.model.parameters())
+        params_to_offload = int(total_params * self.fraction_on_cpu)
+
+        # Identify parameters to offload (typically early network layers)
+        # For UNet, we'll focus on keeping middle and upsampling blocks on GPU
+        # while offloading the initial downsampling blocks to CPU
+        params_count = 0
+        for name, module in self.model.named_modules():
+            # If we've offloaded enough parameters, stop
+            if params_count >= params_to_offload:
+                break
+
+            # UNet typically has down_blocks, mid_block, and up_blocks
+            # We prioritize keeping mid_block and up_blocks on GPU
+            if "down_blocks" in name:
+                for param_name, param in module.named_parameters(recurse=False):
+                    full_name = f"{name}.{param_name}"
+                    # Store original device
+                    self.original_devices[full_name] = param.device
+                    # Move parameter to CPU
+                    param.data = param.data.cpu()
+                    params_count += param.numel()
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        # Restore parameters to their original devices
+        for name, module in self.model.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                full_name = f"{name}.{param_name}"
+                if full_name in self.original_devices:
+                    # Move back to original device
+                    param.data = param.data.to(self.original_devices[full_name])
+
+        # Clear stored devices
+        self.original_devices.clear()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+def main(args):
     # Set up model objects
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet(
@@ -49,7 +226,8 @@ def main(args):
         pretrained = torch.load(args.pretrained_model_path)["model_state"]
         model.load_state_dict(pretrained)
 
-    optimizer = torch.optim.AdamW(
+    # Use CPU Optimizer for memory savings
+    optimizer = CPUAdamW(
         model.parameters(),
         lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
@@ -82,7 +260,6 @@ def main(args):
         num_training_steps=total_num_steps,
     )
 
-    # summary(model, [(1, 3, args.resolution, args.resolution), (1,)], verbose=1)
     scaler = GradScaler(enabled=args.fp16_precision)
     global_step = 0
     losses = []
@@ -106,25 +283,33 @@ def main(args):
             ).long()
             noisy_images = noise_scheduler.add_noise(orig_images, noise, timesteps)
 
-            with autocast(enabled=args.fp16_precision, device_type=device.type):
-                noise_pred = model(noisy_images, timesteps, metadata)["sample"]
-                loss = (
-                    F.l1_loss(noise_pred, noise) / args.gradient_accumulation_steps
-                )  # Normalize loss
+            # Use activation offloading during forward and backward pass
+            with ActivationOffloader(threshold_mb=50) as activation_offloader:
+                # Selectively offload parameters - only during inference
+                with autocast(enabled=args.fp16_precision, device_type=device.type):
+                    noise_pred = model(noisy_images, timesteps, metadata)["sample"]
+                    loss = (
+                        F.l1_loss(noise_pred, noise) / args.gradient_accumulation_steps
+                    )  # Normalize loss
 
-            scaler.scale(loss).backward()
+                scaler.scale(loss).backward()
 
             # Only update weights when enough steps have been accumulated
             if (step + 1) % args.gradient_accumulation_steps == 0:
                 if args.use_clip_grad:
                     clip_grad_norm_(model.parameters(), 1.0)
 
+                # Move parameters back to GPU if needed before optimizer step
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()  # Reset gradients after step
                 ema.update_params(gamma)
                 gamma = ema.update_gamma(global_step)
                 lr_scheduler.step()
+
+                # Explicit cleanup to free memory
+                torch.cuda.empty_cache()
+                gc.collect()
 
             progress_bar.update(1)
             losses_log += (
@@ -145,35 +330,36 @@ def main(args):
             if global_step % args.save_model_steps == 0:
                 ema.ema_model.eval()
                 with torch.no_grad():
-                    # has to be instantiated every time, because of reproducibility
-                    generator = torch.manual_seed(0)
-                    generated_images = noise_scheduler.generate(
-                        ema.ema_model,
-                        num_inference_steps=n_inference_timesteps,
-                        generator=generator,
-                        eta=1.0,
-                        batch_size=args.eval_batch_size,
-                        guidance_scale=args.guidance_scale,
-                        metadata=metadata,
-                    )
+                    # Use parameter offloading during inference to save memory
+                    with ParameterOffloader(model, fraction_on_cpu=0.3):
+                        # has to be instantiated every time, because of reproducibility
+                        generator = torch.manual_seed(0)
+                        generated_images = noise_scheduler.generate(
+                            ema.ema_model,
+                            num_inference_steps=args.n_inference_timesteps,
+                            generator=generator,
+                            eta=1.0,
+                            batch_size=args.eval_batch_size,
+                            guidance_scale=args.guidance_scale,
+                            metadata=metadata,
+                        )
 
-                    save_images(generated_images, epoch, args)
-                    out_dir = Path(args.output_dir)
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    out_path = os.path.join(
-                        args.output_dir, f"checkpoint_{epoch}_{global_step}.pth"
-                    )
+                        save_images(generated_images, epoch, args)
+                        out_dir = Path(args.output_dir)
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        out_path = os.path.join(
+                            args.output_dir, f"checkpoint_{epoch}_{global_step}.pth"
+                        )
 
-                    torch.save(
-                        {
-                            "model_state": model.state_dict(),
-                            "ema_model_state": ema.ema_model.state_dict(),
-                            "optimizer_state": optimizer.state_dict(),
-                        },
-                        out_path,
-                    )
+                        torch.save(
+                            {
+                                "model_state": model.state_dict(),
+                                "ema_model_state": ema.ema_model.state_dict(),
+                                "optimizer_state": optimizer.state_dict(),
+                            },
+                            out_path,
+                        )
 
-            # progress_bar.close()
             losses.append(losses_log / (step + 1))
 
 
